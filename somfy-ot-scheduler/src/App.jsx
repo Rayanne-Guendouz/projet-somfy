@@ -6,14 +6,31 @@ import { create } from 'zustand';
 
 // --- 1. LE STORE (Logique de données) ---
 const useStore = create((set) => ({
-  tasks: [
-    { id: 'T1', title: 'Prod Volet RS100', machineId: 'M1', progress: 70, status: 'running' },
-    { id: 'T2', title: 'Prod Bras TS441', machineId: 'M1', progress: 20, status: 'running' },
-    { id: 'T3', title: 'Prod Moteur Kit', machineId: 'M2', progress: 100, status: 'completed' },
+ tasks: [
+    { id: 'T1', title: 'Prod Volet RS100', machineId: 'M1', progress: 70, priority: 'High' },
+    { id: 'T2', title: 'Prod Bras TS441', machineId: 'M1', progress: 20, priority: 'Medium' },
+    { id: 'T3', title: 'Prod Moteur Kit', machineId: 'M2', progress: 100, priority: 'Low' },
   ],
-  moveTask: (taskId, newMachineId) => set((state) => ({
-    tasks: state.tasks.map(t => t.id === taskId ? { ...t, machineId: newMachineId } : t)
-  })),
+
+  previousState: null,
+
+  moveTask: (taskId, newMachineId) => set((state) => {
+    // On sauvegarde l'état actuel avant de modifier
+    const currentState = { tasks: [...state.tasks] }; 
+    return {
+      previousState: currentState,
+      tasks: state.tasks.map(t => t.id === taskId ? { ...t, machineId: newMachineId } : t)
+    };
+  }),
+
+  undo: () => set((state) => {
+    if (!state.previousState) return state;
+    return { 
+      tasks: state.previousState.tasks, 
+      previousState: null // On vide après l'annulation
+    };
+  }),
+
   simulateProgress: () => set((state) => ({
     tasks: state.tasks.map(t => ({
       ...t,
@@ -52,12 +69,24 @@ const Board = styled.div`
 `;
 
 const MachineCard = styled.div`
-  background: #1e293b;
+  background: ${props => props.$isOverloaded ? '#451a1a' : '#1e293b'};
   width: 320px;
   border-radius: 12px;
   padding: 20px;
-  border: 1px solid #334155;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  border: 1px solid ${props => props.$isOverloaded ? '#ef4444' : '#334155'};
+  transition: all 0.3s ease;
+`;
+
+// Badge de priorité
+const PriorityBadge = styled.div`
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: ${props => {
+    if (props.$level === 'High') return '#ef4444';
+    if (props.$level === 'Medium') return '#f59e0b';
+    return '#3b82f6';
+  }};
 `;
 
 const TaskBox = styled.div`
@@ -129,7 +158,8 @@ const SimulateButton = styled.button`
 
 // --- 3. L'APPLICATION ---
 function App() {
-  const { tasks, moveTask,simulateProgress } = useStore();
+  const { tasks, moveTask,simulateProgress, undo, previousState
+   } = useStore();
   const machines = [
     { id: 'M1', name: 'Ligne 001', type: 'Assemblage' },
     { id: 'M2', name: 'Ligne 002', type: 'Packaging' }
@@ -173,26 +203,34 @@ function App() {
         >
           Simuler Production
         </SimulateButton>
+          <button 
+            onClick={undo} 
+            disabled={!previousState}
+            style={{ opacity: previousState ? 1 : 0.5 }}
+          >
+            Annuler Déplacement
+          </button>
       </HeaderContainer>
 
       <DragDropContext onDragEnd={onDragEnd}>
         <Board>
-          {machines.map(machine => (
-            <MachineCard key={machine.id}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <div>
-                  <div style={{ fontWeight: '800', fontSize: '16px' }}>{machine.name}</div>
-                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>{machine.type}</div>
-                </div>
-                <Settings size={20} color="#64748b" />
-              </div>
+          {machines.map(machine => {
+            const machineTasks = tasks.filter(t => t.machineId === machine.id);
+            const isOverloaded = machineTasks.length > 2;
 
-              <Droppable droppableId={machine.id}>
-                {(provided) => (
-                  <div {...provided.droppableProps} ref={provided.innerRef} style={{ minHeight: '300px' }}>
-                    {tasks
-                      .filter(t => t.machineId === machine.id)
-                      .map((task, index) => (
+            return (
+              <MachineCard key={machine.id} $isOverloaded={isOverloaded}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                  <strong>{machine.name}</strong>
+                  <Settings size={18} color="#94a3b8" />
+                </div>
+                
+                {isOverloaded && <div style={{color: '#ef4444', fontSize: '10px', fontWeight: 'bold', marginBottom: '10px'}}>⚠️ SURCHARGE LIGNE</div>}
+
+                <Droppable droppableId={machine.id}>
+                  {(provided) => (
+                    <div {...provided.droppableProps} ref={provided.innerRef} style={{ minHeight: '150px' }}>
+                      {machineTasks.map((task, index) => (
                         <Draggable key={task.id} draggableId={task.id} index={index}>
                           {(provided) => (
                             <TaskBox
@@ -201,31 +239,25 @@ function App() {
                               {...provided.dragHandleProps}
                               $isCompleted={task.progress === 100}
                             >
-                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                                <span style={{ fontSize: '11px', color: '#94a3b8', fontFamily: 'monospace' }}>{task.id}</span>
-                                <StatusBadge type={task.progress === 100 ? 'completed' : 'running'}>
-                                  {task.progress === 100 ? <CheckCircle2 size={12} /> : <Clock size={12} />}
-                                  {task.progress === 100 ? 'Terminé' : 'En cours'}
-                                </StatusBadge>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <PriorityBadge $level={task.priority} />
+                                <div style={{ fontWeight: '600', fontSize: '14px' }}>{task.title}</div>
                               </div>
-                              <div style={{ fontWeight: '600', fontSize: '14px' }}>{task.title}</div>
                               
                               <ProgressBarContainer>
                                 <ProgressFill progress={task.progress} />
                               </ProgressBarContainer>
-                              <div style={{ fontSize: '10px', marginTop: '4px', color: '#94a3b8', textAlign: 'right' }}>
-                                {task.progress}% optimisé
-                              </div>
                             </TaskBox>
                           )}
                         </Draggable>
                       ))}
-                    {provided.placeholder}
-                  </div>
-                )}
-              </Droppable>
-            </MachineCard>
-          ))}
+                      {provided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+              </MachineCard>
+            );
+          })}
         </Board>
       </DragDropContext>
     </Container>
