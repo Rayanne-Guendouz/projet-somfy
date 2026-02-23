@@ -37,6 +37,11 @@ const useStore = create((set) => ({
       progress: t.progress < 100 ? Math.min(t.progress + 5, 100) : 100
     }))
   })),
+
+  deleteTask: (taskId) => set((state) => ({
+    previousState: { tasks: [...state.tasks] },
+    tasks: state.tasks.filter(t => t.id !== taskId)
+  })),
 }));
 
 // --- 2. LES COMPOSANTS STYLISÉS (Le Design) ---
@@ -156,9 +161,19 @@ const SimulateButton = styled.button`
   fontWeight: '600'
 `;
 
+const TrashZone = styled.div`
+  margin-top: 20px;
+  padding: 15px;
+  border: 2px dashed ${props => props.$isDraggingOver ? '#ef4444' : '#334155'};
+  background: ${props => props.$isDraggingOver ? '#ef444422' : 'transparent'};
+  border-radius: 8px;
+  text-align: center;
+  color: ${props => props.$isDraggingOver ? '#ef4444' : '#64748b'};
+`;
+
 // --- 3. L'APPLICATION ---
 function App() {
-  const { tasks, moveTask,simulateProgress, undo, previousState
+  const { tasks, moveTask,simulateProgress, undo, previousState,deleteTask
    } = useStore();
   const machines = [
     { id: 'M1', name: 'Ligne 001', type: 'Assemblage' },
@@ -166,27 +181,25 @@ function App() {
   ];
 
   React.useEffect(() => {
-    console.log("Flux OT Somfy activé...");
-  }, []);
+    const interval = setInterval(() => {
+      simulateProgress();
+    }, 5000); // Avancement auto toutes les 5 secondes
+
+    return () => clearInterval(interval);
+  }, [simulateProgress]);
   
- const onDragEnd = (result) => {
-    const { destination, source, draggableId } = result;
+const onDragEnd = (result) => {
+  const { destination, draggableId } = result;
+  if (!destination) return;
 
-    // 1. Si on lâche l'objet en dehors d'une zone de drop, on ne fait rien
-    if (!destination) return;
-
-    // 2. Si on lâche l'objet au même endroit (même machine ET même index), on ne fait rien
-    if (
-      destination.droppableId === source.droppableId &&
-      destination.index === source.index
-    ) {
-      return;
-    }
-
-    // 3. On appelle la fonction du store
-    // On lui donne l'ID de la tâche et l'ID de la machine de destination
-    moveTask(draggableId, destination.droppableId);
-  };
+  // Si on dépose dans la corbeille
+  if (destination.droppableId === 'trash') {
+    deleteTask(draggableId);
+    return;
+  }
+  
+  moveTask(draggableId, destination.droppableId);
+};
 
   return (
     <Container>
@@ -203,13 +216,13 @@ function App() {
         >
           Simuler Production
         </SimulateButton>
-          <button 
-            onClick={undo} 
-            disabled={!previousState}
-            style={{ opacity: previousState ? 1 : 0.5 }}
-          >
-            Annuler Déplacement
-          </button>
+        <SimulateButton 
+          onClick={undo} 
+          disabled={!previousState}
+          style={{ opacity: previousState ? 1 : 0.5 }}
+        >
+          Annuler Dernière Action
+        </SimulateButton>
       </HeaderContainer>
 
       <DragDropContext onDragEnd={onDragEnd}>
@@ -259,6 +272,14 @@ function App() {
             );
           })}
         </Board>
+        <Droppable droppableId="trash">
+          {(provided, snapshot) => (
+            <TrashZone ref={provided.innerRef} {...provided.droppableProps} $isDraggingOver={snapshot.isDraggingOver}>
+              {snapshot.isDraggingOver ? "⚠️ Relâcher pour supprimer" : "🗑️ Glisser ici pour retirer du flux"}
+              {provided.placeholder}
+            </TrashZone>
+          )}
+        </Droppable>
       </DragDropContext>
     </Container>
   );
